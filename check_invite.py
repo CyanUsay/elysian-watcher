@@ -43,7 +43,7 @@ SERVERCHAN_SENDKEY = os.environ.get("SERVERCHAN_SENDKEY", "")
 # 保存状态的文件名。
 STATE_FILE = os.environ.get("STATE_FILE", "state.json")
 
-# 「仍然开放」提醒的时间阈值（分钟）。开放超过这个时间后会再提醒一次。
+# 「仍然开放」提醒的间隔（分钟）。开放后每隔这么久就再提醒一次，直到关闭为止。
 REMIND_AFTER_MINUTES = int(os.environ.get("REMIND_AFTER_MINUTES", "30"))
 
 # Discord API 地址。with_counts=true 让接口顺便返回服务器的在线/成员人数。
@@ -68,14 +68,15 @@ def load_state():
         status         当前状态："paused"（暂停）或 "open"（开放）。
         open_since     最近一次变为开放的时间（ISO 格式字符串），暂停时为 None。
         notified_open  是否已经发过「开放了」的通知。
-        notified_30min 是否已经发过「仍然开放」的通知。
+        last_remind_at 上次发送「仍然开放」提醒的时间（ISO 格式字符串）。
+                       用它来实现「每隔 30 分钟重复提醒一次」。
     """
     if not os.path.exists(STATE_FILE):
         return {
             "status": "paused",       # 题目说明：当前初始状态为「邀请已暂停」。
             "open_since": None,
             "notified_open": False,
-            "notified_30min": False,
+            "last_remind_at": None,
         }
 
     with open(STATE_FILE, "r", encoding="utf-8") as f:
@@ -201,28 +202,31 @@ def main():
                 "Discord 邀请码 `elysianhorizon` 现在已经开放，赶紧加入！\n\n"
                 f"链接: https://discord.gg/{INVITE_CODE}",
             )
-            # 记录开放起始时间，并重置通知标记。
+            # 记录开放起始时间，并把「上次提醒时间」设为现在（首次开放通知就算一次提醒），
+            # 这样接下来每隔 30 分钟才会再发「仍然开放」提醒。
             state["status"] = "open"
             state["open_since"] = now.isoformat()
             state["notified_open"] = True
-            state["notified_30min"] = False
+            state["last_remind_at"] = now.isoformat()
         else:
-            # —— 情况 B：之前就已经开放，检查是否已经开放超过 30 分钟 ——
-            open_since = state.get("open_since")
-            if open_since and not state.get("notified_30min"):
-                opened_at = datetime.fromisoformat(open_since)
-                elapsed_minutes = (now - opened_at).total_seconds() / 60.0
-                print(f"[判断] 已持续开放约 {elapsed_minutes:.1f} 分钟。")
+            # —— 情况 B：之前就已经开放，检查距离上次提醒是否又过了 30 分钟 ——
+            # 用「上次提醒时间」来判断，从而实现每 30 分钟重复提醒一次，直到关闭为止。
+            last_remind_at = state.get("last_remind_at") or state.get("open_since")
+            if last_remind_at:
+                last_remind = datetime.fromisoformat(last_remind_at)
+                elapsed_minutes = (now - last_remind).total_seconds() / 60.0
+                print(f"[判断] 距离上次提醒约 {elapsed_minutes:.1f} 分钟。")
 
                 if elapsed_minutes >= REMIND_AFTER_MINUTES:
-                    print("[判断] 开放已超过阈值，发送「仍然开放」提醒。")
+                    print("[判断] 距上次提醒已满间隔，再次发送「仍然开放」提醒。")
                     send_notification(
                         "⚠️ Elysian Horizon仍然开放中",
-                        f"Discord 邀请码 `elysianhorizon` 已经持续开放超过 "
-                        f"{REMIND_AFTER_MINUTES} 分钟，依然可以加入！\n\n"
+                        f"Discord 邀请码 `elysianhorizon` 依然处于开放状态，可以加入！\n\n"
+                        f"（每 {REMIND_AFTER_MINUTES} 分钟提醒一次，直到关闭为止）\n\n"
                         f"链接: https://discord.gg/{INVITE_CODE}",
                     )
-                    state["notified_30min"] = True
+                    # 更新「上次提醒时间」，开始下一个 30 分钟的计时。
+                    state["last_remind_at"] = now.isoformat()
             else:
                 print("[判断] 仍然开放，但无需再次通知。")
     else:
@@ -235,7 +239,7 @@ def main():
         state["status"] = "paused"
         state["open_since"] = None
         state["notified_open"] = False
-        state["notified_30min"] = False
+        state["last_remind_at"] = None
 
     # 4. 保存最新状态。
     save_state(state)
