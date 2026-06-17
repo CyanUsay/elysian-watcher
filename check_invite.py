@@ -209,6 +209,8 @@ def main():
                 "Discord 邀请码 `elysianhorizon` 现在已经开放，赶紧加入！\n\n"
                 f"链接: https://discord.gg/{INVITE_CODE}",
             )
+            # 紧接着再单独发一条「纯链接」通知，标题就是链接本身，方便直接长按复制。
+            send_notification(f"https://discord.gg/{INVITE_CODE}")
             # 记录开放起始时间，并把「上次提醒时间」设为现在（首次开放通知就算一次提醒），
             # 这样接下来每隔 30 分钟才会再发「仍然开放」提醒。
             state["status"] = "open"
