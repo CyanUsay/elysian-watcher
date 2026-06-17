@@ -178,10 +178,11 @@ python check_invite.py
 - GitHub 对定时任务（schedule）有一定延迟，尤其在整点等高峰期，延迟几分钟是正常的。
 - 长期没有任何提交活动的仓库，GitHub 可能会暂停其定时任务；偶尔手动跑一次即可。
 
-**Q：邀请码状态判断不准怎么办？**
-- Discord 的「暂停邀请」在不同情况下 API 返回可能略有差异。
-  可以查看 Actions 日志里打印的 HTTP 状态码，并在 `check_invite.py` 的
-  `check_invite_status()` 函数里按实际情况微调判断逻辑（代码里有详细注释）。
+**Q：邀请码状态是怎么判断开放还是暂停的？**
+- Discord 在「暂停邀请」时**仍然返回 HTTP 200** 和完整的服务器数据，所以**不能只看状态码**。
+- 真正的标志是返回数据里 `guild.features` 数组是否包含 `INVITES_DISABLED`：
+  包含则为**暂停**，不包含则为**开放**。
+- 相关逻辑在 `check_invite.py` 的 `check_invite_status()` 函数里，有详细注释，可按需调整。
 
 ---
 

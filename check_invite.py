@@ -99,14 +99,14 @@ def check_invite_status():
 
     返回字符串 "open" 或 "paused"。
 
-    判断逻辑：
-        - Discord 在邀请有效时返回 HTTP 200，并带有完整的邀请信息（含 guild）。
-        - 当邀请被暂停（Pause Invites）、失效或不存在时，接口通常返回 404
-          并带有错误码（例如 10006 "Unknown Invite"）。
-        - 因此：能正常拿到邀请数据 => open；否则 => paused。
-
-    注意：Discord 的「暂停邀请」行为在不同情况下表现可能略有差异，如果将来
-    发现判断不准，可以在这里根据实际返回内容调整。
+    判断逻辑（重点）：
+        - Discord 在暂停邀请（Pause Invites）时，接口**仍然返回 HTTP 200** 并带有
+          完整的服务器数据，所以**不能只看状态码**！真正的暂停标志是
+          guild.features 数组里是否包含 "INVITES_DISABLED"。
+        - 因此判断规则是：
+            * HTTP 200 且 features 里**没有** INVITES_DISABLED  -> open（开放）
+            * HTTP 200 但 features 里**有** INVITES_DISABLED      -> paused（暂停）
+            * 邀请失效/不存在（404 等）                          -> paused（暂停）
     """
     try:
         resp = requests.get(DISCORD_API_URL, headers=REQUEST_HEADERS, timeout=15)
@@ -125,13 +125,20 @@ def check_invite_status():
             print("[警告] 响应不是合法 JSON，当作暂停处理。")
             return "paused"
 
-        # 正常的邀请数据里会有 "code" 字段等于邀请码本身，并且包含 guild 信息；
-        # 错误响应里 "code" 是一个数字错误码。这里通过有没有 guild 来判断。
-        if data.get("code") == INVITE_CODE or "guild" in data:
-            print("[查询] 邀请有效 -> 开放(open)")
-            return "open"
-        print(f"[查询] 返回 200 但内容异常: {data} -> 暂停(paused)")
-        return "paused"
+        # 正常的邀请数据里 "code" 等于邀请码本身，并且包含 guild 信息；
+        # 错误响应里 "code" 是一个数字错误码。先确认这是一份正常的邀请数据。
+        if data.get("code") != INVITE_CODE and "guild" not in data:
+            print(f"[查询] 返回 200 但内容异常: {data} -> 暂停(paused)")
+            return "paused"
+
+        # 关键：检查服务器是否开启了「暂停邀请」。
+        features = data.get("guild", {}).get("features", [])
+        if "INVITES_DISABLED" in features:
+            print("[查询] 检测到 INVITES_DISABLED -> 邀请已暂停(paused)")
+            return "paused"
+
+        print("[查询] 邀请有效且未暂停 -> 开放(open)")
+        return "open"
 
     # 其它情况（404 等）一律视为暂停/失效。
     print(f"[查询] 邀请不可用(状态码 {resp.status_code}) -> 暂停(paused)")
