@@ -1,0 +1,2 @@
+# 这个脚本只依赖 requests 库，用于发送 HTTP 请求（查询 Discord、调用 Server酱）。
+requests>=2.31.0

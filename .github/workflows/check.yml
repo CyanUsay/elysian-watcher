@@ -1,0 +1,65 @@
+# GitHub Actions 工作流：定时监控 Discord 邀请码状态
+# ===================================================
+# 这个工作流会每 10 分钟自动运行一次 check_invite.py，
+# 检查邀请码状态并在状态发生变化时通过 Server酱推送微信通知。
+
+name: Check Discord Invite
+
+# 触发条件
+on:
+  # 1) 定时触发：使用 cron 表达式，每 10 分钟运行一次。
+  #    "*/10 * * * *" 的含义是「每隔 10 分钟的第 0 分钟执行」。
+  #    注意：GitHub Actions 的定时任务使用 UTC 时间，并且在高峰期可能会有
+  #    几分钟延迟，这是 GitHub 平台的正常现象。
+  schedule:
+    - cron: "*/10 * * * *"
+
+  # 2) 手动触发：在 GitHub 网页的 Actions 页面可以点按钮手动运行，方便测试。
+  workflow_dispatch:
+
+# 给工作流写权限，这样它才能把更新后的 state.json 提交回仓库。
+permissions:
+  contents: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 第 1 步：把仓库代码拉取到运行环境里。
+      - name: 检出代码 (Checkout)
+        uses: actions/checkout@v4
+
+      # 第 2 步：安装 Python 环境。
+      - name: 安装 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # 第 3 步：安装依赖（requests 库）。
+      - name: 安装依赖
+        run: pip install -r requirements.txt
+
+      # 第 4 步：运行监控脚本。
+      #    SERVERCHAN_SENDKEY 从仓库的 Secrets 注入到环境变量中，脚本会自动读取。
+      - name: 运行邀请码检查
+        env:
+          SERVERCHAN_SENDKEY: ${{ secrets.SERVERCHAN_SENDKEY }}
+        run: python check_invite.py
+
+      # 第 5 步：如果 state.json 有变化，就提交并推送回仓库，
+      #    这样下一次运行时才能读取到最新状态（实现「跨次运行记忆」）。
+      - name: 保存状态 (提交 state.json)
+        run: |
+          # 配置一个用于提交的机器人身份。
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # 只有当 state.json 确实发生变化时才提交，避免产生空提交。
+          if ! git diff --quiet state.json; then
+            git add state.json
+            git commit -m "chore: 更新邀请码监控状态 [skip ci]"
+            git push
+          else
+            echo "状态没有变化，无需提交。"
+          fi
