@@ -2,5 +2,6 @@
   "status": "paused",
   "open_since": null,
   "notified_open": false,
-  "last_remind_at": null
+  "last_remind_at": null,
+  "last_heartbeat": null
 }

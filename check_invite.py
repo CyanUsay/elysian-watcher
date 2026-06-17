@@ -46,6 +46,10 @@ STATE_FILE = os.environ.get("STATE_FILE", "state.json")
 # 「仍然开放」提醒的间隔（分钟）。开放后每隔这么久就再提醒一次，直到关闭为止。
 REMIND_AFTER_MINUTES = int(os.environ.get("REMIND_AFTER_MINUTES", "30"))
 
+# 「心跳」通知的间隔（小时）。每隔这么久发一条「监控正常运行中」的微信，
+# 让你即使状态没变化也能确认脚本还活着。设为 0 可关闭心跳。
+HEARTBEAT_INTERVAL_HOURS = float(os.environ.get("HEARTBEAT_INTERVAL_HOURS", "24"))
+
 # Discord API 地址。with_counts=true 让接口顺便返回服务器的在线/成员人数。
 DISCORD_API_URL = f"https://discord.com/api/v10/invites/{INVITE_CODE}?with_counts=true"
 
@@ -70,6 +74,8 @@ def load_state():
         notified_open  是否已经发过「开放了」的通知。
         last_remind_at 上次发送「仍然开放」提醒的时间（ISO 格式字符串）。
                        用它来实现「每隔 30 分钟重复提醒一次」。
+        last_heartbeat 上次发送「心跳」通知的时间（ISO 格式字符串）。
+                       用它来实现「每隔 24 小时确认一次脚本还活着」。
     """
     if not os.path.exists(STATE_FILE):
         return {
@@ -77,6 +83,7 @@ def load_state():
             "open_since": None,
             "notified_open": False,
             "last_remind_at": None,
+            "last_heartbeat": None,
         }
 
     with open(STATE_FILE, "r", encoding="utf-8") as f:
@@ -250,7 +257,29 @@ def main():
         state["notified_open"] = False
         state["last_remind_at"] = None
 
-    # 4. 保存最新状态。
+    # 4. 心跳：每隔 HEARTBEAT_INTERVAL_HOURS 小时发一条「监控正常」通知，
+    #    这样即使状态长期不变，你也能在微信里确认脚本还在正常运行。
+    if HEARTBEAT_INTERVAL_HOURS > 0:
+        last_heartbeat = state.get("last_heartbeat")
+        # 距上次心跳的小时数；从没发过则视为「早就该发了」。
+        if last_heartbeat:
+            hb_elapsed_hours = (now - datetime.fromisoformat(last_heartbeat)).total_seconds() / 3600.0
+        else:
+            hb_elapsed_hours = HEARTBEAT_INTERVAL_HOURS  # 触发首次心跳
+
+        if hb_elapsed_hours >= HEARTBEAT_INTERVAL_HOURS:
+            # 用中文描述当前状态，方便一眼看懂。
+            status_cn = "开放中 ✅" if state["status"] == "open" else "暂停中 ⏸️"
+            print("[心跳] 距上次心跳已满间隔，发送「监控正常」通知。")
+            send_notification(
+                "✅ Elysian 监控正常运行中",
+                f"脚本运行正常。当前邀请状态：**{status_cn}**\n\n"
+                f"（这是每 {HEARTBEAT_INTERVAL_HOURS:.0f} 小时一次的例行心跳，"
+                f"用于确认监控还活着，无需理会）",
+            )
+            state["last_heartbeat"] = now.isoformat()
+
+    # 5. 保存最新状态。
     save_state(state)
 
 
